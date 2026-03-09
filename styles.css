@@ -1,0 +1,154 @@
+:root {
+  --bg: #e8efdf;
+  --surface: #fbfdf7;
+  --text: #223019;
+  --muted: #5f7053;
+  --accent: #4f7a37;
+  --danger: #9a2f2f;
+  --border: #c8d7bc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Noto Sans SC", "PingFang SC", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 10px 10px, #d3e8c8 0 4.5px, transparent 5px),
+    radial-gradient(circle at 24px 24px, #bfdab0 0 4px, transparent 4.5px),
+    radial-gradient(circle at 8px 26px, #f0f4dc 0 3.5px, transparent 4px),
+    radial-gradient(circle at 28px 8px, #c5dfb8 0 3.5px, transparent 4px),
+    radial-gradient(circle at 18px 16px, #e4efd6 0 2.5px, transparent 3px),
+    linear-gradient(180deg, #edf5e5 0%, #e2ebd8 100%);
+  background-size: 38px 38px, 38px 38px, 38px 38px, 38px 38px, 38px 38px, auto;
+}
+
+.container {
+  max-width: 860px;
+  margin: 28px auto;
+  padding: 0 16px 32px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+header p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  margin-top: 14px;
+  box-shadow: 0 6px 14px rgba(62, 98, 43, 0.12);
+}
+
+h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.wrap {
+  flex-wrap: wrap;
+}
+
+input,
+button,
+textarea {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 0.96rem;
+}
+
+input,
+textarea {
+  flex: 1;
+  padding: 10px;
+  min-width: 160px;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(0.96);
+}
+
+#itemsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+}
+
+.item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.item-name {
+  font-weight: 700;
+}
+
+.item-meta {
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.del {
+  background: var(--danger);
+}
+
+.tip {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+textarea {
+  width: 100%;
+  min-height: 120px;
+  margin-top: 8px;
+  resize: vertical;
+}
+
+@media (max-width: 640px) {
+  .row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  button {
+    width: 100%;
+  }
+}

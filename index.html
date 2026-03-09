@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>家庭食材面板</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>家庭食材面板</h1>
+        <p>两个人共用，同步库存，支持照片识别录入</p>
+      </header>
+
+      <section class="card">
+        <h2>家庭同步设置</h2>
+        <p>你和老公输入同一个“家庭代码”即可看到同一份食材列表。</p>
+        <div class="row">
+          <input id="householdId" type="text" placeholder="例如：li-family-2026" />
+          <button id="connectBtn">连接家庭仓库</button>
+        </div>
+        <p class="tip">首次创建后，把家庭代码发给对方即可。</p>
+      </section>
+
+      <section class="card">
+        <h2>手动添加食材</h2>
+        <form id="addForm" class="row wrap">
+          <input id="nameInput" type="text" placeholder="食材名，例如 鸡蛋" required />
+          <input id="qtyInput" type="text" placeholder="数量，例如 12个 / 500g" />
+          <button type="submit">添加</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>拍照识别后添加</h2>
+        <p>支持：冰箱照片、食材标签、小票（文字越清晰越准）。</p>
+        <div class="row wrap">
+          <input id="imageInput" type="file" accept="image/*" />
+          <button id="scanBtn" type="button">识别照片文字</button>
+        </div>
+        <p id="ocrStatus" class="tip"></p>
+        <textarea id="ocrResult" placeholder="识别出的候选食材会显示在这里，可编辑后再导入"></textarea>
+        <div class="row">
+          <button id="importBtn" type="button">导入识别结果</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>当前食材</h2>
+        <ul id="itemsList"></ul>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
