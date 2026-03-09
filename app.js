@@ -1,9 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
-  addDoc,
   collection,
   doc,
   getFirestore,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -165,6 +165,17 @@ function formatQty(value) {
   return Number.isInteger(value) ? `${value}` : `${value.toFixed(2).replace(/\.?0+$/, "")}`;
 }
 
+function buildItemDocId(name) {
+  const key = normalizeForLookup(name) || name.trim().toLowerCase();
+  return encodeURIComponent(key);
+}
+
+function showError(context, error) {
+  const message = error?.message || String(error);
+  console.error(context, error);
+  ocrStatus.textContent = `${context}失败：${message}`;
+}
+
 function getItemQuantity(data) {
   if (typeof data.qtyValue === "number" && Number.isFinite(data.qtyValue) && data.qtyValue > 0) {
     return { value: data.qtyValue, unit: data.qtyUnit || "个" };
@@ -247,6 +258,8 @@ function listenItems(householdId) {
 
   unsubscribe = onSnapshot(q, (snapshot) => {
     renderItems(snapshot.docs);
+  }, (error) => {
+    showError("同步食材", error);
   });
 }
 
@@ -271,14 +284,89 @@ async function addItem(name, qtyValue = 1, qtyUnit = "个") {
   }
   const safeQtyValue = Number.isFinite(qtyValue) && qtyValue > 0 ? roundQty(qtyValue) : 1;
   const safeQtyUnit = qtyUnit.trim() || "个";
-
-  await addDoc(collection(db, "households", currentHouseholdId, "items"), {
-    name: name.trim(),
-    qtyValue: safeQtyValue,
-    qtyUnit: safeQtyUnit,
-    qty: `${formatQty(safeQtyValue)} ${safeQtyUnit}`,
-    createdAt: serverTimestamp(),
+  const trimmedName = name.trim();
+  const normalizedName = normalizeForLookup(trimmedName);
+  const itemsRef = collection(db, "households", currentHouseholdId, "items");
+  const itemRef = doc(
+    db,
+    "households",
+    currentHouseholdId,
+    "items",
+    buildItemDocId(trimmedName),
+  );
+  let result = { merged: false, name: trimmedName, qtyValue: safeQtyValue, qtyUnit: safeQtyUnit };
+  const snapshot = await getDocs(itemsRef);
+  const matchedDocs = snapshot.docs.filter((d) => {
+    const data = d.data();
+    const docName = typeof data.name === "string" ? data.name : "";
+    return normalizeForLookup(docName) === normalizedName;
   });
+
+  await runTransaction(db, async (transaction) => {
+    if (matchedDocs.length > 0) {
+      let mergedBase = 0;
+      let canonicalExists = false;
+      for (const matchedDoc of matchedDocs) {
+        const data = matchedDoc.data();
+        const qty = getItemQuantity(data);
+        mergedBase += qty.value;
+        if (matchedDoc.ref.path === itemRef.path) {
+          canonicalExists = true;
+        }
+      }
+
+      const mergedQtyValue = roundQty(mergedBase + safeQtyValue);
+      if (canonicalExists) {
+        transaction.update(itemRef, {
+          name: trimmedName,
+          qtyValue: mergedQtyValue,
+          qtyUnit: safeQtyUnit,
+          qty: `${formatQty(mergedQtyValue)} ${safeQtyUnit}`,
+        });
+      } else {
+        transaction.set(itemRef, {
+          name: trimmedName,
+          qtyValue: mergedQtyValue,
+          qtyUnit: safeQtyUnit,
+          qty: `${formatQty(mergedQtyValue)} ${safeQtyUnit}`,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      for (const matchedDoc of matchedDocs) {
+        if (matchedDoc.ref.path !== itemRef.path) {
+          transaction.delete(matchedDoc.ref);
+        }
+      }
+
+      result = { merged: true, name: trimmedName, qtyValue: mergedQtyValue, qtyUnit: safeQtyUnit };
+      return;
+    }
+
+    const existingSnapshot = await transaction.get(itemRef);
+    if (existingSnapshot.exists()) {
+      const current = getItemQuantity(existingSnapshot.data());
+      const mergedQtyValue = roundQty(current.value + safeQtyValue);
+      transaction.update(itemRef, {
+        name: trimmedName,
+        qtyValue: mergedQtyValue,
+        qtyUnit: safeQtyUnit,
+        qty: `${formatQty(mergedQtyValue)} ${safeQtyUnit}`,
+      });
+      result = { merged: true, name: trimmedName, qtyValue: mergedQtyValue, qtyUnit: safeQtyUnit };
+      return;
+    }
+
+    transaction.set(itemRef, {
+      name: trimmedName,
+      qtyValue: safeQtyValue,
+      qtyUnit: safeQtyUnit,
+      qty: `${formatQty(safeQtyValue)} ${safeQtyUnit}`,
+      createdAt: serverTimestamp(),
+    });
+  });
+
+  return result;
 }
 
 async function reduceItemQuantity(itemId, reduceBy) {
@@ -323,23 +411,31 @@ addForm.addEventListener("submit", async (event) => {
     alert("请输入正确的数量（大于 0）");
     return;
   }
-  ocrStatus.textContent = "正在转换为中文...";
-  const resolved = await resolveToChinese(name);
-  if (!resolved) {
-    ocrStatus.textContent = "已取消添加";
-    return;
+  try {
+    ocrStatus.textContent = "正在转换为中文...";
+    const resolved = await resolveToChinese(name);
+    if (!resolved) {
+      ocrStatus.textContent = "已取消添加";
+      return;
+    }
+    const detail = resolved.byDictionary ? "（词典自动转换）" : (resolved.manual ? "（手动确认）" : "（已是中文）");
+    const ok = window.confirm(`确认添加食材？\n原文：${resolved.original}\n入库中文：${resolved.chinese} ${detail}\n数量：${formatQty(qtyValue)} ${qtyUnit}`);
+    if (!ok) {
+      ocrStatus.textContent = "已取消添加";
+      return;
+    }
+    const addResult = await addItem(resolved.chinese, qtyValue, qtyUnit);
+    if (addResult?.merged) {
+      ocrStatus.textContent = `已累加：${resolved.chinese}，当前 ${formatQty(addResult.qtyValue)} ${addResult.qtyUnit}`;
+    } else {
+      ocrStatus.textContent = `已添加：${resolved.chinese}（${formatQty(qtyValue)} ${qtyUnit}）`;
+    }
+    nameInput.value = "";
+    qtyInput.value = "1";
+    qtyUnitInput.value = qtyUnit || "个";
+  } catch (error) {
+    showError("添加食材", error);
   }
-  const detail = resolved.byDictionary ? "（词典自动转换）" : (resolved.manual ? "（手动确认）" : "（已是中文）");
-  const ok = window.confirm(`确认添加食材？\n原文：${resolved.original}\n入库中文：${resolved.chinese} ${detail}\n数量：${formatQty(qtyValue)} ${qtyUnit}`);
-  if (!ok) {
-    ocrStatus.textContent = "已取消添加";
-    return;
-  }
-  await addItem(resolved.chinese, qtyValue, qtyUnit);
-  ocrStatus.textContent = `已添加：${resolved.chinese}（${formatQty(qtyValue)} ${qtyUnit}）`;
-  nameInput.value = "";
-  qtyInput.value = "1";
-  qtyUnitInput.value = qtyUnit || "个";
 });
 
 itemsList.addEventListener("click", async (event) => {
@@ -359,11 +455,15 @@ itemsList.addEventListener("click", async (event) => {
     return;
   }
 
-  const result = await reduceItemQuantity(itemId, reduceBy);
-  if (result.deleted) {
-    ocrStatus.textContent = `已扣减并移除：${result.name}`;
-  } else {
-    ocrStatus.textContent = `已扣减 ${formatQty(reduceBy)}，剩余 ${formatQty(result.nextValue)} ${result.unit}`;
+  try {
+    const result = await reduceItemQuantity(itemId, reduceBy);
+    if (result.deleted) {
+      ocrStatus.textContent = `已扣减并移除：${result.name}`;
+    } else {
+      ocrStatus.textContent = `已扣减 ${formatQty(reduceBy)}，剩余 ${formatQty(result.nextValue)} ${result.unit}`;
+    }
+  } catch (error) {
+    showError("扣减食材", error);
   }
 });
 
@@ -374,44 +474,48 @@ scanBtn.addEventListener("click", async () => {
     return;
   }
 
-  ocrStatus.textContent = "正在识别图片文字，请稍等...";
-  const {
-    data: { text },
-  } = await Tesseract.recognize(file, "chi_sim+eng+deu+fra+spa+ita", {
-    logger: (m) => {
-      if (m.status === "recognizing text") {
-        ocrStatus.textContent = `识别中：${Math.round(m.progress * 100)}%`;
+  try {
+    ocrStatus.textContent = "正在识别图片文字，请稍等...";
+    const {
+      data: { text },
+    } = await Tesseract.recognize(file, "chi_sim+eng+deu+fra+spa+ita", {
+      logger: (m) => {
+        if (m.status === "recognizing text") {
+          ocrStatus.textContent = `识别中：${Math.round(m.progress * 100)}%`;
+        }
+      },
+    });
+
+    const lines = text
+      .split(/\n+/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+    const detected = new Set();
+    for (const line of lines) {
+      for (const ingredient of commonIngredients) {
+        if (line.includes(ingredient)) {
+          detected.add(ingredient);
+        }
       }
-    },
-  });
-
-  const lines = text
-    .split(/\n+/)
-    .map((x) => x.trim())
-    .filter(Boolean);
-
-  const detected = new Set();
-  for (const line of lines) {
-    for (const ingredient of commonIngredients) {
-      if (line.includes(ingredient)) {
-        detected.add(ingredient);
+      const mapped = mapIngredientToChinese(line);
+      if (mapped) {
+        detected.add(mapped);
       }
     }
-    const mapped = mapIngredientToChinese(line);
-    if (mapped) {
-      detected.add(mapped);
+
+    const output = [...detected];
+    if (!output.length) {
+      ocrResult.value = lines.slice(0, 20).join("\n");
+      ocrStatus.textContent = "未自动匹配到常见食材，已填入原始识别结果，请手工编辑后导入。";
+      return;
     }
-  }
 
-  const output = [...detected];
-  if (!output.length) {
-    ocrResult.value = lines.slice(0, 20).join("\n");
-    ocrStatus.textContent = "未自动匹配到常见食材，已填入原始识别结果，请手工编辑后导入。";
-    return;
+    ocrResult.value = output.join("\n");
+    ocrStatus.textContent = `识别完成，匹配到 ${output.length} 条候选食材。`;
+  } catch (error) {
+    showError("OCR识别", error);
   }
-
-  ocrResult.value = output.join("\n");
-  ocrStatus.textContent = `识别完成，匹配到 ${output.length} 条候选食材。`;
 });
 
 importBtn.addEventListener("click", async () => {
@@ -425,33 +529,37 @@ importBtn.addEventListener("click", async () => {
     return;
   }
 
-  ocrStatus.textContent = "正在转换为中文...";
-  const resolvedList = [];
-  for (const line of lines) {
-    const resolved = await resolveToChinese(line);
-    if (!resolved) continue;
-    resolvedList.push(resolved);
-  }
+  try {
+    ocrStatus.textContent = "正在转换为中文...";
+    const resolvedList = [];
+    for (const line of lines) {
+      const resolved = await resolveToChinese(line);
+      if (!resolved) continue;
+      resolvedList.push(resolved);
+    }
 
-  if (!resolvedList.length) {
-    ocrStatus.textContent = "没有可导入的食材";
-    return;
-  }
+    if (!resolvedList.length) {
+      ocrStatus.textContent = "没有可导入的食材";
+      return;
+    }
 
-  const preview = resolvedList
-    .map((item, idx) => `${idx + 1}. ${item.original} -> ${item.chinese}`)
-    .join("\n");
-  const ok = window.confirm(`请确认导入以下食材（统一中文）：\n\n${preview}`);
-  if (!ok) {
-    ocrStatus.textContent = "已取消导入";
-    return;
-  }
+    const preview = resolvedList
+      .map((item, idx) => `${idx + 1}. ${item.original} -> ${item.chinese}`)
+      .join("\n");
+    const ok = window.confirm(`请确认导入以下食材（统一中文）：\n\n${preview}`);
+    if (!ok) {
+      ocrStatus.textContent = "已取消导入";
+      return;
+    }
 
-  for (const item of resolvedList) {
-    await addItem(item.chinese, 1, "个");
-  }
+    for (const item of resolvedList) {
+      await addItem(item.chinese, 1, "个");
+    }
 
-  ocrStatus.textContent = `已导入 ${resolvedList.length} 条食材（统一为中文）`;
+    ocrStatus.textContent = `已导入 ${resolvedList.length} 条食材（统一为中文）`;
+  } catch (error) {
+    showError("导入食材", error);
+  }
 });
 
 const saved = localStorage.getItem("householdId");
