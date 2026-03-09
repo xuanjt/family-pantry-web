@@ -28,9 +28,11 @@
         <h2>手动添加食材</h2>
         <form id="addForm" class="row wrap">
           <input id="nameInput" type="text" placeholder="食材名，例如 鸡蛋" required />
-          <input id="qtyInput" type="text" placeholder="数量，例如 12个 / 500g" />
+          <input id="qtyInput" type="number" min="0.01" step="0.01" placeholder="数量，例如 12" value="1" required />
+          <input id="qtyUnitInput" type="text" placeholder="单位，例如 个 / g / 瓶" value="个" />
           <button type="submit">添加</button>
         </form>
+        <p class="tip">删除时支持按数量扣减，减到 0 会自动移除该食材。</p>
       </section>
 
       <section class="card">
